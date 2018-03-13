@@ -63,18 +63,8 @@ int Win32Error(char* context) {
     exit(1);
 }
 
-void GetHandles(HANDLE *hInConsole, HANDLE *hOutConsole, HANDLE *hInStandard, HANDLE *hOutStandard) {
+void GetStandardHandles(HANDLE *hInStandard, HANDLE *hOutStandard) {
     /* Getting handles for STDIN, STDOUT, CONIN$ and CONOUT$ */
-    *hOutConsole = CreateFile("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE,
-                              NULL, OPEN_EXISTING, 0, NULL);
-    if (*hOutConsole == INVALID_HANDLE_VALUE) {
-        Win32Error("Could not create a CONOUT$ handle");
-    }
-    *hInConsole = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
-                             NULL, OPEN_EXISTING, 0, NULL);
-    if (*hInConsole == INVALID_HANDLE_VALUE) {
-        Win32Error("Could not create a CONIN$ handle");
-    }
     *hOutStandard = GetStdHandle(STD_OUTPUT_HANDLE);
     if (*hOutStandard == INVALID_HANDLE_VALUE) {
         Win32Error("Could not create a stdout handle");
@@ -85,18 +75,23 @@ void GetHandles(HANDLE *hInConsole, HANDLE *hOutConsole, HANDLE *hInStandard, HA
     }
 }
 
-int main(int argc, char *argv[]) {
-    int i;
-    HANDLE hInConsole, hOutConsole, hInStandard, hOutStandard;
-    DWORD dwWritten, dwRead, dwPromptLen, dwLastError, oldConsoleMode, newConsoleMode;
-    BOOL result, hideInput, stdinPrompt;
-    char pass[ALOT], prompt[ALOT];
-    ProcessCommandLineArguments(argc, argv, prompt, &hideInput, &stdinPrompt);
-
-    GetHandles(&hInConsole, &hOutConsole, &hInStandard, &hOutStandard);
-    if (stdinPrompt) {
-        ReadFile(hInStandard, prompt, ALOT, &dwRead, NULL) || Win32Error("Could not read from stdin");
+void GetConsoleHandles(HANDLE *hInConsole, HANDLE *hOutConsole) {
+    *hOutConsole = CreateFile("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE,
+                              NULL, OPEN_EXISTING, 0, NULL);
+    if (*hOutConsole == INVALID_HANDLE_VALUE) {
+        Win32Error("Could not create a CONOUT$ handle");
     }
+    *hInConsole = CreateFile("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+                             NULL, OPEN_EXISTING, 0, NULL);
+    if (*hInConsole == INVALID_HANDLE_VALUE) {
+        Win32Error("Could not create a CONIN$ handle");
+    }
+}
+
+void ConsoleAskPass(BOOL hideInput, char* prompt, char* pass) {
+    HANDLE hInConsole, hOutConsole;
+    GetConsoleHandles(&hInConsole, &hOutConsole);
+    DWORD dwWritten, dwRead, oldConsoleMode, newConsoleMode;
     WriteFile(hOutConsole, prompt, strlen(prompt), &dwWritten, NULL) || Win32Error("Could not write to console");
     GetConsoleMode(hInConsole, &oldConsoleMode) || Win32Error("Could not get console mode");
     newConsoleMode = oldConsoleMode | ENABLE_LINE_INPUT;
@@ -114,10 +109,26 @@ int main(int argc, char *argv[]) {
         in the end of the read string */
         Win32Error("Something went wrong and impossibly short prompt answer is read.");
     }
-    WriteFile(hOutStandard, pass, dwRead - 2, &dwWritten, NULL) || Win32Error("Could not write to stdout");
-    CloseHandle(hInStandard);
-    CloseHandle(hOutStandard);
+    pass[dwRead-2] = 0;
     CloseHandle(hInConsole);
     CloseHandle(hOutConsole);
+}
+
+int main(int argc, char *argv[]) {
+    int i;
+    HANDLE hInConsole, hOutConsole, hInStandard, hOutStandard;
+    DWORD dwWritten, dwRead, dwPromptLen, dwLastError, oldConsoleMode, newConsoleMode;
+    BOOL result, hideInput, stdinPrompt;
+    char pass[ALOT], prompt[ALOT];
+    ProcessCommandLineArguments(argc, argv, prompt, &hideInput, &stdinPrompt);
+
+    GetStandardHandles(&hInStandard, &hOutStandard);
+    if (stdinPrompt) {
+        ReadFile(hInStandard, prompt, ALOT, &dwRead, NULL) || Win32Error("Could not read from stdin");
+    }
+    ConsoleAskPass(hideInput, prompt, pass);
+    WriteFile(hOutStandard, pass, strlen(pass), &dwWritten, NULL) || Win32Error("Could not write to stdout");
+    CloseHandle(hInStandard);
+    CloseHandle(hOutStandard);
     return 0;
 }
