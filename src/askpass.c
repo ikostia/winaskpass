@@ -2,15 +2,50 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define ALOT 65536
+
 void PrintHelp() {
-    fprintf(stderr, "Usage:\n> askpass.exe [-p]\n");
+    fprintf(stderr, "Usage:\n> askpass.exe [-p] [-m MSG]\n\n");
     fprintf(stderr, "askpass.exe will read the prompt from its standard input,\n");
     fprintf(stderr, "print it into its console, read the reply from the console\n");
-    fprintf(stderr, "and write the reply to the standard output. Providing -p\n");
-    fprintf(stderr, "will cause askpass.exe to not echo the reply in the console\n");
+    fprintf(stderr, "and write the reply to the standard output.\n");
     fprintf(stderr, "The expected use case is askpass.exe being called from another\n");
     fprintf(stderr, "process, whose standard streams were redirected, but which\n");
-    fprintf(stderr, "still needs to communicate with the real user\n");
+    fprintf(stderr, "still needs to communicate with the real user.\n\n");
+    fprintf(stderr, "  -p        do not echo entered characters to the console\n");
+    fprintf(stderr, "  -m MSG    use MSG as a prompt instead of reading it from STDIN\n");
+}
+
+void ProcessCommandLineArguments(int argc, char *argv[], char* prompt, BOOL *hideInput, BOOL *stdinPrompt) {
+    int i;
+    *hideInput = 0;
+    *stdinPrompt = 1;
+    for (i=1; i<argc; ++i) {
+        if (strcmp(argv[i], "-h") == 0) {
+            PrintHelp();
+            exit(1);
+        } else if ((strcmp(argv[i], "-m") == 0)) {
+            if (i == argc - 1) {
+                fprintf(stderr, "-m expects an argument\n");
+                PrintHelp();
+                exit(1);
+            }
+            i++;
+            if (strlen(argv[i]) > ALOT) {
+                fprintf(stderr, "maximum size of a prompt is %d", ALOT);
+                exit(1);
+            }
+            strcpy(prompt, argv[i]);
+            *stdinPrompt = 0;
+        } else if (strcmp(argv[i], "-p") == 0) {
+            *hideInput = 1;
+        } else {
+            fprintf(stderr, "unknown argument: %s\n", argv[i]);
+            PrintHelp();
+            exit(1);
+        }
+    }
+
 }
 
 int Win32Error(char* context) {
@@ -50,21 +85,18 @@ void GetHandles(HANDLE *hInConsole, HANDLE *hOutConsole, HANDLE *hInStandard, HA
     }
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     int i;
     HANDLE hInConsole, hOutConsole, hInStandard, hOutStandard;
     DWORD dwWritten, dwRead, dwPromptLen, dwLastError, oldConsoleMode, newConsoleMode;
-    BOOL result, hideInput;
-    char pass[65536], prompt[65536];
-
-    if (argc > 2 || (argc == 2 && strcmp(argv[1], "-p") != 0)) {
-        PrintHelp();
-        return 1;
-    }
-    hideInput = argc == 2;
+    BOOL result, hideInput, stdinPrompt;
+    char pass[ALOT], prompt[ALOT];
+    ProcessCommandLineArguments(argc, argv, prompt, &hideInput, &stdinPrompt);
 
     GetHandles(&hInConsole, &hOutConsole, &hInStandard, &hOutStandard);
-    ReadFile(hInStandard, prompt, 65535, &dwRead, NULL) || Win32Error("Could not read from stdin");
+    if (stdinPrompt) {
+        ReadFile(hInStandard, prompt, ALOT, &dwRead, NULL) || Win32Error("Could not read from stdin");
+    }
     WriteFile(hOutConsole, prompt, strlen(prompt), &dwWritten, NULL) || Win32Error("Could not write to console");
     GetConsoleMode(hInConsole, &oldConsoleMode) || Win32Error("Could not get console mode");
     newConsoleMode = oldConsoleMode | ENABLE_LINE_INPUT;
@@ -75,7 +107,7 @@ int main(int argc, char* argv[]) {
     }
     SetConsoleMode(hInConsole, newConsoleMode) || Win32Error("Could not set console mode");
     dwRead = 0;
-    ReadFile(hInConsole, pass, 65535, &dwRead, NULL) || Win32Error("Could not read from console");
+    ReadFile(hInConsole, pass, ALOT, &dwRead, NULL) || Win32Error("Could not read from console");
     SetConsoleMode(hInConsole, oldConsoleMode) || Win32Error("Could not restore console mode");
     if (dwRead < 2) {
         /* This should not ever occur, as the \r\n should always be present
